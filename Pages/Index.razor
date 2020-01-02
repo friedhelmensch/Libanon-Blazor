@@ -1,0 +1,110 @@
+﻿@page "/"
+@inject HttpClient Http
+@inject Libanon.Services.BusTimer Timer
+
+<h1>Nächste Abfahrten</h1>
+
+<p>Nächste Abfahrten der Busse an der Haltestelle Libanonstraße.</p>
+
+@if (stops == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Richtung</th>
+                <th>Minuten</th>
+                <th>Uhrzeit</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var stop in stops)
+            {
+                <tr>
+                    <td>@stop.Name</td>
+                    <td>@(Math.Round((stop.DepartureTime - DateTime.UtcNow.AddHours(1)).TotalMinutes))</td>
+                    <td>@stop.DepartureTime.ToString("HH:mm")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+
+    private StopInformation[] stops;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Timer.OnElapsed += TimerElapsedHandler;
+        this.TimerElapsedHandler();
+        Console.WriteLine("Init done");
+    }
+
+     private async void TimerElapsedHandler()
+    {
+        var now = DateTime.UtcNow.AddHours(1);
+        
+        var year = now.Year.ToString();
+        var month = now.Month.ToString().Length == 1 ? "0" + now.Month.ToString() : now.Month.ToString();
+        var day = now.Day.ToString().Length == 1 ? "0" + now.Day.ToString() : now.Day.ToString();
+
+        var dateString = year + month + day;
+
+        var hour = now.Hour.ToString().Length == 1 ? "0" + now.Hour.ToString() : now.Hour.ToString();
+        var minute = now.Minute.ToString().Length == 1 ? "0" + now.Minute.ToString() : now.Minute.ToString();
+
+        var timeString = hour + minute;
+        var requestString = 
+            "https://cors-anywhere.herokuapp.com/" + 
+            "https://www3.vvs.de/mngvvs/XML_DM_REQUEST?SpEncId=0&coordOutputFormat=EPSG:4326&deleteAssignedStops=1&limit=5&macroWebDep=true&mode=direct&name_dm=de:08111:2201&outputFormat=rapidJSON&serverInfo=1&type_dm=any&useRealtime=1&version=10.2.10.139" +
+            "&itdDate=" + dateString +
+            "&itdTime=" + timeString;
+        
+        var schedule = await Http.GetJsonAsync<BusSchedule>(requestString);
+
+        this.stops = schedule.StopEvents.Select(x => {
+            var departureTime = x.DepartureTimeEstimated == new DateTime() ? x.DepartureTimePlanned : x.DepartureTimeEstimated;
+            var name = x.Transportation.Destination.Name;
+            return new StopInformation(name, departureTime.AddHours(1));
+            }).ToArray();
+
+        Console.WriteLine("new stops");
+        Timer.SetTimer(1000 * 5);
+        this.StateHasChanged();
+    }
+
+    public class BusSchedule
+    {
+        public StopEvent[] StopEvents {get;set;}
+    }
+
+    public class StopInformation
+    {
+        public StopInformation(String name, DateTime departureTime)
+        {
+            this.DepartureTime = departureTime;
+            this.Name = name;
+        }
+        public DateTime DepartureTime { get; }
+        public string Name { get; }
+    }
+    public class StopEvent
+    {
+        public DateTime DepartureTimeEstimated { get; set; }
+        public DateTime DepartureTimePlanned { get; set; }
+        public Transportation Transportation { get; set; }
+    }
+
+    public class Transportation
+    {
+        public Destination Destination { get; set; }
+    }
+    public class Destination
+    {
+        public string Name { get; set; }
+    }
+}
